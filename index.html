@@ -15,6 +15,22 @@
     --text: #e8e4dc;
     --text-muted: #888498;
     --accent: #c8a96e;
+    --heat-sq-light: #18161e;
+    --heat-sq-dark: #100e14;
+    --canvas-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  }
+
+  body.light {
+    --bg: #f0ede8;
+    --surface: #e6e2da;
+    --surface2: #dbd6cc;
+    --border: #c4bdb0;
+    --text: #1a1814;
+    --text-muted: #7a7060;
+    --accent: #8a6030;
+    --heat-sq-light: #f5f2ee;
+    --heat-sq-dark: #ede9e3;
+    --canvas-shadow: 0 8px 40px rgba(0,0,0,0.15);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -132,7 +148,7 @@
   .board-wrap { display: flex; flex-direction: column; align-items: center; gap: 5px; }
   .board-title { font-size: 0.55rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted); }
 
-  canvas { display: block; border-radius: 2px; box-shadow: 0 8px 40px rgba(0,0,0,0.7), 0 0 0 1px var(--border); }
+  canvas { display: block; border-radius: 2px; box-shadow: var(--canvas-shadow), 0 0 0 1px var(--border); transition: box-shadow 0.3s; }
 
   .nav-row { display: flex; gap: 5px; align-items: center; }
   .nav-btn {
@@ -143,7 +159,7 @@
   .nav-btn:hover { border-color: var(--accent); color: var(--accent); }
   .nav-btn:disabled { opacity: 0.22; cursor: default; pointer-events: none; }
   .move-counter { font-size: 0.6rem; color: var(--text-muted); min-width: 88px; text-align: center; }
-  .hint { font-size: 0.53rem; color: #3e3c4a; text-align: center; }
+  .hint { font-size: 0.53rem; color: var(--text-muted); text-align: center; opacity: 0.6; }
 
   /* Right panel */
   .color-key { display: flex; flex-direction: column; gap: 8px; }
@@ -189,6 +205,33 @@
     opacity: 0; transition: all 0.25s; z-index: 9998; pointer-events: none;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* Theme transition */
+  body, .panel, header, .stat, .mode-desc, .fen, textarea, .drop-zone, .sq-row {
+    transition: background 0.25s, border-color 0.25s, color 0.25s;
+  }
+
+  /* Theme toggle */
+  .theme-toggle {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.55rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text-muted); cursor: pointer; user-select: none;
+  }
+  .theme-toggle:hover { color: var(--accent); }
+  .toggle-track {
+    width: 32px; height: 17px; border-radius: 9px;
+    background: var(--border); border: 1px solid var(--border);
+    position: relative; transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  body.light .toggle-track { background: var(--accent); }
+  .toggle-thumb {
+    position: absolute; top: 2px; left: 2px;
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--text-muted); transition: transform 0.2s, background 0.2s;
+  }
+  body.light .toggle-thumb { transform: translateX(15px); background: #fff; }
 </style>
 </head>
 <body>
@@ -196,6 +239,10 @@
 <header>
   <h1>♟ ChessMap</h1>
   <span class="tagline">Positional Heatmap Analyzer</span>
+  <div class="theme-toggle" onclick="toggleTheme()">
+    <span id="theme-label">Dark</span>
+    <div class="toggle-track"><div class="toggle-thumb"></div></div>
+  </div>
 </header>
 
 <div class="layout">
@@ -484,8 +531,11 @@ function renderHeatmap() {
     const idx=r*8+c;
     const hw=nW[idx], hb=nB[idx];
 
-    // Dark checkerboard base — much subtler than chess board
-    hctx.fillStyle=(r+c)%2===0?'#18161e':'#100e14';
+    // Checkerboard base — adapts to theme
+    const isLightMode = document.body.classList.contains('light');
+    hctx.fillStyle=(r+c)%2===0
+      ? (isLightMode ? '#f5f2ee' : '#18161e')
+      : (isLightMode ? '#ede9e3' : '#100e14');
     hctx.fillRect(x,y,SQ,SQ);
 
     let rgb=null;
@@ -548,14 +598,35 @@ function renderHeatmap() {
     }
 
     if (rgb) {
-      hctx.fillStyle=`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      let [fr, fg, fb] = rgb;
+      if (isLightMode) {
+        // Light mode: high coverage = dark ink on light background
+        // Compute luminance of the dark-mode color (bright = high coverage)
+        const lum = (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) / 255;
+        // lum ~0 = uncovered (dark square in dark mode) → should be near-white in light
+        // lum ~1 = max coverage (bright in dark mode) → should be dark tinted ink in light
+        // Map: light bg (#f5f2ee ~0.96) to dark tinted color at full coverage
+        // Keep the hue (orange/blue/yellow) but crush the brightness
+        const inkStrength = lum * 0.82; // how dark the ink gets (0=no ink, 0.82=full)
+        // Blend from light bg color toward the hue color
+        const bgR = 245, bgG = 241, bgB = 236; // matches --heat-sq-light
+        // Saturated hue version of the color (normalize to pure hue)
+        const maxC = Math.max(rgb[0], rgb[1], rgb[2]) || 1;
+        const hR = Math.round(rgb[0] / maxC * 255);
+        const hG = Math.round(rgb[1] / maxC * 255);
+        const hB = Math.round(rgb[2] / maxC * 255);
+        fr = Math.max(0, Math.round(bgR - (bgR - hR * 0.3) * inkStrength));
+        fg = Math.max(0, Math.round(bgG - (bgG - hG * 0.3) * inkStrength));
+        fb = Math.max(0, Math.round(bgB - (bgB - hB * 0.3) * inkStrength));
+      }
+      hctx.fillStyle=`rgb(${fr},${fg},${fb})`;
       hctx.fillRect(x,y,SQ,SQ);
     }
   }
 
   // Subtle coord labels
   hctx.font=`${SQ*0.15}px JetBrains Mono,monospace`;
-  hctx.fillStyle='rgba(255,255,255,0.18)';
+  hctx.fillStyle=document.body.classList.contains('light') ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.18)';
   for (let i=0;i<8;i++) {
     hctx.textAlign='left';hctx.textBaseline='top';
     hctx.fillText(8-i,2,i*SQ+2);
@@ -705,6 +776,13 @@ function resetBoard(){
 }
 function copyFEN(){navigator.clipboard.writeText(game.fen()).then(()=>showToast('FEN copied'));}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2000);}
+
+// ── Theme ──────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light');
+  document.getElementById('theme-label').textContent = isLight ? 'Light' : 'Dark';
+  render();
+}
 
 // ── Init ───────────────────────────────────────────────────────────────
 calcSize();
