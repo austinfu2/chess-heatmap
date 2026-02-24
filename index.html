@@ -503,27 +503,33 @@ function renderHeatmap() {
       } else {
         const balance = hasW && hasB ? hw/(hw+hb) : hasW ? 1.0 : 0.0;
         // balance: 1.0=all white, 0.5=equal, 0.0=all black
+        // minority: how much the losing side is contesting (0=no contest, 1=equal)
+        const minority = hasW && hasB ? Math.min(hw, hb) / Math.max(hw, hb) : 0.0;
 
-        // Each side's brightness scaled independently
-        const brtW     = Math.min(hw * intensity * 1.1, 1.0);
-        const brtB     = Math.min(hb * intensity * 1.1, 1.0);
-        const brtTotal = Math.min((hw + hb) * intensity * 0.6, 1.0);
+        const domIntensity = Math.min(Math.max(hw, hb) * intensity * 1.1, 1.0);
+        const brtTotal     = Math.min((hw + hb) * intensity * 0.55, 1.0);
 
-        // Three pure anchor colors
-        const W = [255, Math.round(110*brtW),   Math.round(8*brtW)   ]; // orange-red (White)
-        const B = [Math.round(8*brtB),  Math.round(100*brtB), 255    ]; // blue (Black)
-        const C = [255, Math.round(235*brtTotal), Math.round(20*brtTotal)]; // bright yellow (Contested)
+        // Base dominant color
+        let dR, dG, dB;
+        if (balance >= 0.5) {
+          dR = 255; dG = Math.round(85 * domIntensity); dB = Math.round(5 * domIntensity);
+        } else {
+          dR = Math.round(5 * domIntensity); dG = Math.round(75 * domIntensity); dB = 255;
+        }
 
-        // contestedness: 1 when perfectly equal, 0 when one side dominates
-        const contestedness = Math.pow(1.0 - Math.abs(balance - 0.5) * 2, 2.0);
-        const cW = (1 - contestedness) * balance;
-        const cB = (1 - contestedness) * (1 - balance);
-        const cC = contestedness;
+        // Yellow anchor for equal contest
+        const yR = 255, yG = Math.round(228 * brtTotal), yB = Math.round(12 * brtTotal);
+
+        // minority=0 → pure dominant color
+        // minority=1 → pure yellow (equal)
+        // In between: smoothly shift dominant color toward yellow
+        // Use a linear blend so 1v2 (minority=0.5) is visibly halfway
+        const t = Math.pow(minority, 0.8); // slight curve so even small minorities register
 
         rgb = [
-          Math.min(255, Math.round(W[0]*cW + B[0]*cB + C[0]*cC)),
-          Math.min(255, Math.round(W[1]*cW + B[1]*cB + C[1]*cC)),
-          Math.min(255, Math.round(W[2]*cW + B[2]*cB + C[2]*cC)),
+          Math.min(255, Math.round(dR * (1-t) + yR * t)),
+          Math.min(255, Math.round(dG * (1-t) + yG * t)),
+          Math.min(255, Math.round(dB * (1-t) + yB * t)),
         ];
       }
     }
