@@ -314,10 +314,10 @@ let selected = null;
 let historyHeat = null;
 
 const MODE_INFO = {
-  control: { title: 'Attack Control', desc: '<strong>Attack Control</strong>Warm colors (orange/yellow) = White dominates. Cool colors (blue/cyan) = Black dominates. White hot = both sides fighting over the square. Intensity follows the thermal scale above.' },
-  history: { title: 'Game History',   desc: '<strong>Game History</strong>Accumulates every position played so far. Reveals which squares were contested or dominated throughout the whole game, not just right now.' },
-  white:   { title: 'White Coverage', desc: '<strong>White Coverage</strong>Only White\'s attack reach, drawn with the full thermal scale. Black = no coverage. Blue = 1 piece. Red/yellow = many pieces pointing here.' },
-  black:   { title: 'Black Coverage', desc: '<strong>Black Coverage</strong>Only Black\'s attack reach, drawn with the full thermal scale. Black = no coverage. Blue = 1 piece. Red/yellow = many pieces pointing here.' },
+  control: { title: 'Attack Control', desc: '<strong>Attack Control</strong>Orange/red = White dominates. Blue/cyan = Black dominates. Yellow/white = both sides contesting equally. Brightness = total number of pieces covering the square.' },
+  history: { title: 'Game History',   desc: '<strong>Game History</strong>Accumulates all attack coverage across every position played so far. Same color logic: orange = White territory, blue = Black territory, bright = heavily fought over.' },
+  white:   { title: 'White Coverage', desc: '<strong>White Coverage</strong>Only White\'s attack reach. Dark = no coverage. Dim orange = 1 piece. Bright red/white = many pieces pointing here.' },
+  black:   { title: 'Black Coverage', desc: '<strong>Black Coverage</strong>Only Black\'s attack reach. Dark = no coverage. Dim blue = 1 piece. Bright cyan/white = many pieces pointing here.' },
 };
 
 // ── Size ───────────────────────────────────────────────────────────────
@@ -478,42 +478,53 @@ function renderHeatmap() {
     let rgb=null;
 
     if (heatMode==='white') {
-      if (hw>0.01) rgb=thermal(hw*intensity);
+      if (hw>0.01) {
+        // White only: thermal intensity, orange-red tint
+        const t = hw*intensity;
+        const [tr,tg,tb] = thermal(t);
+        rgb = [Math.min(255, tr+40), Math.round(tg*0.6), Math.round(tb*0.3)];
+      }
     } else if (heatMode==='black') {
-      if (hb>0.01) rgb=thermal(hb*intensity);
+      if (hb>0.01) {
+        // Black only: thermal intensity, blue-cyan tint
+        const t = hb*intensity;
+        const [tr,tg,tb] = thermal(t);
+        rgb = [Math.round(tr*0.25), Math.round(tg*0.7+tb*0.15), Math.min(255, tb+30)];
+      }
     } else {
-      // Control / History: White uses warm end, Black uses cool end
-      // Blend based on dominance
+      // Control / History
+      // Concept: intensity = total coverage (thermal brightness), tint = who dominates
+      // Pure white dominant → orange/red palette
+      // Pure black dominant → blue/cyan palette  
+      // Contested → yellow/white (hot and neutral)
       const hasW=hw>0.02, hasB=hb>0.02;
       if (!hasW && !hasB) {
-        rgb=null; // dark square, no coverage
-      } else if (hasW && !hasB) {
-        // White only — full thermal (warm)
-        rgb=thermal(hw*intensity);
-      } else if (hasB && !hasW) {
-        // Black only — cool inverted: remap black thermal so high intensity = cool blue/cyan
-        // We flip the thermal scale so high = blue side (low t = cool)
-        const flipped = 1.0 - hb*intensity*0.85; // invert
-        const t_cool = Math.max(0, Math.min(flipped, 0.45)); // clamp to cool half
-        rgb=thermal(t_cool);
+        rgb=null;
       } else {
-        // Both — blend warm (white) and cool (black) by dominance ratio
-        const balance = hw/(hw+hb); // 1=all white, 0=all black
-        const avgIntensity = Math.min((hw+hb)/2*intensity, 1.0);
+        const totalCoverage = Math.min((hw+hb) * intensity, 1.0);
+        const t = totalCoverage; // thermal intensity from total coverage
+        const balance = hasW && hasB ? hw/(hw+hb) : hasW ? 1.0 : 0.0;
+        // balance: 1.0 = all white, 0.5 = equal, 0.0 = all black
 
-        // White side: thermal at full warmth
-        const warmT = hw*intensity;
-        const [wr,wg,wb] = thermal(warmT);
+        // White color: warm orange-red
+        const wR=255, wG=Math.round(140*t), wB=Math.round(20*t);
+        // Black color: cool blue-cyan  
+        const bR=Math.round(20*t), bG=Math.round(180*t), bB=255;
+        // Contested (equal): bright yellow-white
+        const cR=255, cG=Math.round(220*t), cB=Math.round(80*t);
 
-        // Black side: cool blue/cyan
-        const coolT = Math.max(0, 0.4 - hb*intensity*0.35);
-        const [cr,cg,cb] = thermal(coolT);
+        // Smooth blend: pure white=warm, pure black=cool, equal=contested color
+        const distFromCenter = Math.abs(balance - 0.5) * 2; // 0=equal, 1=pure
+        const towardWhite = balance > 0.5 ? (balance-0.5)*2 : 0;  // 0→1
+        const towardBlack = balance < 0.5 ? (0.5-balance)*2 : 0;  // 0→1
 
-        rgb=[
-          Math.round(wr*balance + cr*(1-balance)),
-          Math.round(wg*balance + cg*(1-balance)),
-          Math.round(wb*balance + cb*(1-balance)),
-        ];
+        const r = Math.round(cR + (wR-cR)*towardWhite + (bR-cR)*towardBlack);
+        const g = Math.round(cG + (wG-cG)*towardWhite + (bG-cG)*towardBlack);
+        const b = Math.round(cB + (wB-cB)*towardWhite + (bB-cB)*towardBlack);
+
+        // Scale brightness by intensity so low-coverage squares are dim
+        const brightness = Math.max(0.15, Math.min(t * 1.2, 1.0));
+        rgb = [Math.round(r*brightness), Math.round(g*brightness), Math.round(b*brightness)];
       }
     }
 
