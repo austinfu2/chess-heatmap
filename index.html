@@ -501,30 +501,30 @@ function renderHeatmap() {
       if (!hasW && !hasB) {
         rgb=null;
       } else {
-        const totalCoverage = Math.min((hw+hb) * intensity, 1.0);
-        const t = totalCoverage; // thermal intensity from total coverage
         const balance = hasW && hasB ? hw/(hw+hb) : hasW ? 1.0 : 0.0;
-        // balance: 1.0 = all white, 0.5 = equal, 0.0 = all black
+        // balance: 1.0=all white, 0.5=equal, 0.0=all black
 
-        // White color: warm orange-red
-        const wR=255, wG=Math.round(140*t), wB=Math.round(20*t);
-        // Black color: cool blue-cyan  
-        const bR=Math.round(20*t), bG=Math.round(180*t), bB=255;
-        // Contested (equal): bright yellow-white
-        const cR=255, cG=Math.round(220*t), cB=Math.round(80*t);
+        // Each side's brightness scaled independently
+        const brtW     = Math.min(hw * intensity * 1.1, 1.0);
+        const brtB     = Math.min(hb * intensity * 1.1, 1.0);
+        const brtTotal = Math.min((hw + hb) * intensity * 0.6, 1.0);
 
-        // Smooth blend: pure white=warm, pure black=cool, equal=contested color
-        const distFromCenter = Math.abs(balance - 0.5) * 2; // 0=equal, 1=pure
-        const towardWhite = balance > 0.5 ? (balance-0.5)*2 : 0;  // 0→1
-        const towardBlack = balance < 0.5 ? (0.5-balance)*2 : 0;  // 0→1
+        // Three pure anchor colors
+        const W = [255, Math.round(110*brtW),   Math.round(8*brtW)   ]; // orange-red (White)
+        const B = [Math.round(8*brtB),  Math.round(100*brtB), 255    ]; // blue (Black)
+        const C = [255, Math.round(235*brtTotal), Math.round(20*brtTotal)]; // bright yellow (Contested)
 
-        const r = Math.round(cR + (wR-cR)*towardWhite + (bR-cR)*towardBlack);
-        const g = Math.round(cG + (wG-cG)*towardWhite + (bG-cG)*towardBlack);
-        const b = Math.round(cB + (wB-cB)*towardWhite + (bB-cB)*towardBlack);
+        // contestedness: 1 when perfectly equal, 0 when one side dominates
+        const contestedness = Math.pow(1.0 - Math.abs(balance - 0.5) * 2, 2.0);
+        const cW = (1 - contestedness) * balance;
+        const cB = (1 - contestedness) * (1 - balance);
+        const cC = contestedness;
 
-        // Scale brightness by intensity so low-coverage squares are dim
-        const brightness = Math.max(0.15, Math.min(t * 1.2, 1.0));
-        rgb = [Math.round(r*brightness), Math.round(g*brightness), Math.round(b*brightness)];
+        rgb = [
+          Math.min(255, Math.round(W[0]*cW + B[0]*cB + C[0]*cC)),
+          Math.min(255, Math.round(W[1]*cW + B[1]*cB + C[1]*cC)),
+          Math.min(255, Math.round(W[2]*cW + B[2]*cB + C[2]*cC)),
+        ];
       }
     }
 
