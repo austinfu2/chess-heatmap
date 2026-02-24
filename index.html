@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chess Heatmap Analyzer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0f;
+    --surface: #141418;
+    --surface2: #1c1c22;
+    --border: #2a2a35;
+    --text: #e8e4dc;
+    --text-muted: #6b6878;
+    --accent: #c8a96e;
+    --accent2: #6e8fc8;
+    --white-heat: #4ecb8a;
+    --black-heat: #5b9ef5;
+    --contest-heat: #e85555;
+    --light-sq: #e8d9c0;
+    --dark-sq: #9b7653;
+    --piece-white: #f5f0e8;
+    --piece-black: #1a1a1a;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grain overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.4;
+  }
+
+  header {
+    padding: 20px 40px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+
+  header h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.5rem;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+
+  header span {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 260px 1fr 280px;
+    gap: 0;
+    height: calc(100vh - 65px);
+  }
+
+  /* Left panel */
+  .panel-left {
+    border-right: 1px solid var(--border);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  .section-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #a09aad;
+    margin-bottom: 8px;
+  }
+
+  /* PGN upload area */
+  .pgn-drop {
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    padding: 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+  .pgn-drop:hover { border-color: var(--accent); color: var(--accent); }
+  .pgn-drop.drag-over { border-color: var(--accent); background: rgba(200,169,110,0.05); }
+
+  textarea#pgn-input {
+    width: 100%;
+    height: 120px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    padding: 10px;
+    resize: none;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea#pgn-input:focus { border-color: var(--accent); }
+
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    padding: 8px 14px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { border-color: var(--accent); color: var(--accent); }
+  .btn.primary:hover { background: var(--accent); color: var(--bg); }
+
+  /* Heatmap mode toggle */
+  .toggle-group {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .toggle-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    padding: 7px 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+    border-right: 1px solid var(--border);
+  }
+  .toggle-btn:last-child { border-right: none; }
+  .toggle-btn.active { background: var(--surface2); color: var(--text); }
+  .toggle-btn[data-mode="white"].active { color: var(--white-heat); }
+  .toggle-btn[data-mode="black"].active { color: var(--black-heat); }
+  .toggle-btn[data-mode="control"].active { color: #a87ae8; }
+  .toggle-btn[data-mode="history"].active { color: #7ae8a8; }
+
+  /* Intensity slider */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+  }
+  input[type=range] {
+    flex: 1;
+    accent-color: var(--accent);
+    height: 2px;
+  }
+
+  /* Move list */
+  .move-list {
+    flex: 1;
+    overflow-y: auto;
+    font-size: 0.65rem;
+    line-height: 1.5;
+  }
+  .move-list::-webkit-scrollbar { width: 3px; }
+  .move-list::-webkit-scrollbar-track { background: transparent; }
+  .move-list::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .move-pair {
+    display: grid;
+    grid-template-columns: 28px 1fr 1fr;
+    gap: 2px;
+    padding: 2px 4px;
+    border-radius: 2px;
+  }
+  .move-pair:hover { background: var(--surface2); }
+  .move-num { color: var(--text-muted); }
+  .move-san {
+    padding: 1px 4px;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+  .move-san:hover { color: var(--accent); }
+  .move-san.current { background: var(--accent); color: var(--bg); font-weight: 500; }
+
+  /* Center - board area */
+  .board-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    gap: 16px;
+  }
+
+  .board-container {
+    position: relative;
+    user-select: none;
+  }
+
+  canvas#board-canvas {
+    display: block;
+    border-radius: 2px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px var(--border);
+  }
+
+  /* Nav controls */
+  .nav-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .nav-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 36px;
+    height: 36px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .nav-btn:disabled { opacity: 0.3; cursor: default; }
+
+  .move-counter {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    min-width: 80px;
+    text-align: center;
+  }
+
+  /* Right panel */
+  .panel-right {
+    border-left: 1px solid var(--border);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  .heat-legend { display: flex; flex-direction: column; gap: 10px; }
+  .legend-entry { display: flex; gap: 10px; align-items: flex-start; }
+  .legend-swatch { width: 22px; height: 22px; border-radius: 3px; flex-shrink: 0; margin-top: 1px; }
+  .legend-text { display: flex; flex-direction: column; gap: 2px; }
+  .legend-title { font-size: 0.65rem; font-weight: 500; }
+  .legend-desc { font-size: 0.58rem; color: var(--text-muted); line-height: 1.4; }
+
+  /* Top squares list */
+  .top-squares {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .sq-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px;
+    background: var(--surface2);
+    border-radius: 3px;
+    font-size: 0.65rem;
+  }
+  .sq-name { color: var(--accent); font-weight: 500; }
+  .sq-bar {
+    flex: 1;
+    margin: 0 8px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .sq-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 0.3s;
+  }
+  .sq-count { color: var(--text-muted); font-size: 0.6rem; }
+
+  /* Stats */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px;
+  }
+  .stat-label { font-size: 0.55rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .stat-value { font-size: 1rem; color: var(--text); }
+  .stat-value.w { color: #4ecb8a; }
+  .stat-value.b { color: #5b9ef5; }
+
+  /* FEN display */
+  .fen-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 8px;
+    font-size: 0.55rem;
+    color: var(--text-muted);
+    word-break: break-all;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .fen-box:hover { border-color: var(--accent); }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 8px 20px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 999;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .hint {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>♟ ChessMap</h1>
+  <span>Positional Heatmap Analyzer</span>
+</header>
+
+<div class="app">
+  <!-- LEFT PANEL -->
+  <div class="panel-left">
+    <div>
+      <div class="section-label">Load Game</div>
+      <div class="pgn-drop" id="pgn-drop" onclick="document.getElementById('pgn-file').click()">
+        Drop PGN file here<br>or click to browse
+      </div>
+      <input type="file" id="pgn-file" accept=".pgn" style="display:none">
+    </div>
+
+    <div>
+      <div class="section-label">Paste PGN</div>
+      <textarea id="pgn-input" placeholder="1. e4 e5 2. Nf3 Nc6...&#10;&#10;Or paste a full PGN with headers"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn primary" onclick="loadPGN()" style="flex:1">Load</button>
+        <button class="btn" onclick="resetBoard()">Reset</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Heatmap Mode</div>
+      <div class="toggle-group">
+        <button class="toggle-btn active" data-mode="control" onclick="setMode('control')">Control</button>
+        <button class="toggle-btn" data-mode="history" onclick="setMode('history')">History</button>
+        <button class="toggle-btn" data-mode="white" onclick="setMode('white')">White</button>
+        <button class="toggle-btn" data-mode="black" onclick="setMode('black')">Black</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Intensity</div>
+      <div class="slider-row">
+        <span>Low</span>
+        <input type="range" id="intensity" min="20" max="100" value="65" oninput="render()">
+        <span>High</span>
+      </div>
+    </div>
+
+    <div style="flex:1">
+      <div class="section-label">Moves</div>
+      <div class="move-list" id="move-list"></div>
+    </div>
+  </div>
+
+  <!-- CENTER BOARD -->
+  <div class="board-area">
+    <canvas id="board-canvas" width="480" height="480"></canvas>
+    <div class="nav-controls">
+      <button class="nav-btn" id="btn-start" onclick="goToMove(0)" title="Start">⏮</button>
+      <button class="nav-btn" id="btn-prev" onclick="prevMove()" title="Previous">◀</button>
+      <div class="move-counter" id="move-counter">Start</div>
+      <button class="nav-btn" id="btn-next" onclick="nextMove()" title="Next">▶</button>
+      <button class="nav-btn" id="btn-end" onclick="goToMove(moves.length)" title="End">⏭</button>
+    </div>
+    <div class="hint">Click pieces to move · Arrow keys to navigate · Load PGN to analyze games</div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="panel-right">
+    <div>
+      <div class="section-label">Color Key</div>
+      <div class="heat-legend">
+        <div class="legend-entry">
+          <div class="legend-swatch" style="background:rgba(78,203,138,0.85)"></div>
+          <div class="legend-text">
+            <span class="legend-title" style="color:#4ecb8a">White only</span>
+            <span class="legend-desc">Only White pieces attack this square. Brighter = more pieces.</span>
+          </div>
+        </div>
+        <div class="legend-entry">
+          <div class="legend-swatch" style="background:rgba(91,158,245,0.85)"></div>
+          <div class="legend-text">
+            <span class="legend-title" style="color:#5b9ef5">Black only</span>
+            <span class="legend-desc">Only Black pieces attack this square. Brighter = more pieces.</span>
+          </div>
+        </div>
+        <div class="legend-entry">
+          <div class="legend-swatch" style="background:rgba(232,80,0,0.85)"></div>
+          <div class="legend-text">
+            <span class="legend-title" style="color:#e85555">Contested</span>
+            <span class="legend-desc">Both sides attack. Orange = White leads. Purple = Black leads. Red = equal.</span>
+          </div>
+        </div>
+        <div class="legend-entry">
+          <div class="legend-swatch" style="background:transparent;border:1px dashed var(--border)"></div>
+          <div class="legend-text">
+            <span class="legend-title" style="color:var(--text-muted)">No coverage</span>
+            <span class="legend-desc">No pieces of either side can move here.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Hottest Squares</div>
+      <div class="top-squares" id="top-squares"></div>
+    </div>
+
+    <div>
+      <div class="section-label">Position Stats</div>
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-box"><div class="stat-label">White attacks</div><div class="stat-value w" id="stat-w">—</div></div>
+        <div class="stat-box"><div class="stat-label">Black attacks</div><div class="stat-value b" id="stat-b">—</div></div>
+        <div class="stat-box"><div class="stat-label">Contested</div><div class="stat-value" id="stat-c">—</div></div>
+        <div class="stat-box"><div class="stat-label">Dominant</div><div class="stat-value" id="stat-d">—</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">FEN <span style="color:var(--text-muted)">(click to copy)</span></div>
+      <div class="fen-box" id="fen-display" onclick="copyFEN()"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+const BOARD_SIZE = 480;
+const SQ = BOARD_SIZE / 8;
+const canvas = document.getElementById('board-canvas');
+const ctx = canvas.getContext('2d');
+
+let game = new Chess();
+let moves = [];         // array of SAN moves from PGN
+let moveIndex = 0;      // current position index (0 = start)
+let heatMode = 'control'; // white | black | control | history
+let selected = null;    // selected square for interactive play
+let historyHeat = null; // accumulated heatmap for history mode
+let pieceImages = {};   // preloaded piece images
+
+// Piece unicode symbols for canvas rendering
+const PIECES = {
+  wK:'♔', wQ:'♕', wR:'♖', wB:'♗', wN:'♘', wP:'♙',
+  bK:'♚', bQ:'♛', bR:'♜', bB:'♝', bN:'♞', bP:'♟'
+};
+
+// ── Piece Drawing ──────────────────────────────────────────────────────
+function drawPiece(piece, x, y, size) {
+  const key = piece.color + piece.type.toUpperCase();
+  const sym = PIECES[key];
+  if (!sym) return;
+
+  ctx.save();
+  ctx.font = `bold ${size * 0.72}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillText(sym, x + SQ/2 + 1.5, y + SQ/2 + 1.5);
+
+  // Piece
+  ctx.fillStyle = piece.color === 'w' ? '#f5f0e8' : '#1a1410';
+  ctx.fillText(sym, x + SQ/2, y + SQ/2);
+
+  // Outline for dark pieces
+  if (piece.color === 'b') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeText(sym, x + SQ/2, y + SQ/2);
+  } else {
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 0.8;
+    ctx.strokeText(sym, x + SQ/2, y + SQ/2);
+  }
+  ctx.restore();
+}
+
+// ── Heatmap computation ────────────────────────────────────────────────
+function computeAttackHeat(chess) {
+  const heat = { w: new Array(64).fill(0), b: new Array(64).fill(0) };
+  const board = chess.board();
+
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = board[r][c];
+      if (!piece) continue;
+
+      const file = String.fromCharCode(97 + c);
+      const rank = 8 - r;
+      const sq = file + rank;
+      const attacks = getAttacksFrom(chess, sq, piece);
+
+      attacks.forEach(target => {
+        const tf = target.charCodeAt(0) - 97;
+        const tr = 8 - parseInt(target[1]);
+        const idx = tr * 8 + tf;
+        if (idx >= 0 && idx < 64) {
+          heat[piece.color][idx]++;
+        }
+      });
+    }
+  }
+  return heat;
+}
+
+function getAttacksFrom(chess, sq, piece) {
+  const type = piece.type;
+  const color = piece.color;
+  const file = sq.charCodeAt(0) - 97;
+  const rank = parseInt(sq[1]) - 1;
+  const attacked = [];
+
+  const inBounds = (f, r) => f >= 0 && f < 8 && r >= 0 && r < 8;
+  const toSq = (f, r) => String.fromCharCode(97 + f) + (r + 1);
+  const board = chess.board();
+  const getPiece = (f, r) => board[7 - r][f];
+
+  const slide = (dirs) => {
+    dirs.forEach(([df, dr]) => {
+      let f = file + df, r = rank + dr;
+      while (inBounds(f, r)) {
+        attacked.push(toSq(f, r));
+        if (getPiece(f, r)) break;
+        f += df; r += dr;
+      }
+    });
+  };
+
+  const jump = (moves) => {
+    moves.forEach(([df, dr]) => {
+      const f = file + df, r = rank + dr;
+      if (inBounds(f, r)) attacked.push(toSq(f, r));
+    });
+  };
+
+  if (type === 'r') slide([[1,0],[-1,0],[0,1],[0,-1]]);
+  if (type === 'b') slide([[1,1],[1,-1],[-1,1],[-1,-1]]);
+  if (type === 'q') slide([[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]);
+  if (type === 'n') jump([[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]]);
+  if (type === 'k') jump([[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]);
+  if (type === 'p') {
+    const dir = color === 'w' ? 1 : -1;
+    // Pawns attack diagonally
+    [-1, 1].forEach(df => {
+      const f = file + df, r = rank + dir;
+      if (inBounds(f, r)) attacked.push(toSq(f, r));
+    });
+  }
+
+  return attacked;
+}
+
+function normalizeHeat(arr) {
+  const max = Math.max(...arr, 1);
+  return arr.map(v => v / max);
+}
+
+// ── Render ─────────────────────────────────────────────────────────────
+function render() {
+  ctx.clearRect(0, 0, BOARD_SIZE, BOARD_SIZE);
+
+  const intensity = parseInt(document.getElementById('intensity').value) / 100;
+  const board = game.board();
+
+  // Get current heatmap data
+  let heatW, heatB;
+  if (heatMode === 'history' && historyHeat) {
+    heatW = normalizeHeat(historyHeat.w);
+    heatB = normalizeHeat(historyHeat.b);
+  } else {
+    const heat = computeAttackHeat(game);
+    heatW = normalizeHeat(heat.w);
+    heatB = normalizeHeat(heat.b);
+  }
+
+  // Draw squares
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const x = c * SQ;
+      const y = r * SQ;
+      const isLight = (r + c) % 2 === 0;
+      const idx = r * 8 + c;
+
+      // Base square color
+      ctx.fillStyle = isLight ? '#d4c09a' : '#8b6343';
+      ctx.fillRect(x, y, SQ, SQ);
+
+      // Heat overlay
+      const hw = heatW[idx];
+      const hb = heatB[idx];
+
+      // Color encoding:
+      // Green  = White only   (78,203,138)
+      // Blue   = Black only   (91,158,245)
+      // Red    = Contested — orange tint if White dominates, purple tint if Black dominates
+      // No color = untouched by either side
+
+      const wOnly = hw > 0.04 && hb <= 0.04;
+      const bOnly = hb > 0.04 && hw <= 0.04;
+      const both  = hw > 0.04 && hb > 0.04;
+
+      if (heatMode === 'white') {
+        if (hw > 0.04) {
+          ctx.fillStyle = `rgba(78,203,138,${hw * intensity * 0.82})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        }
+      } else if (heatMode === 'black') {
+        if (hb > 0.04) {
+          ctx.fillStyle = `rgba(91,158,245,${hb * intensity * 0.82})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        }
+      } else if (heatMode === 'control') {
+        if (wOnly) {
+          // Pure green — White exclusive
+          ctx.fillStyle = `rgba(78,203,138,${hw * intensity * 0.82})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        } else if (bOnly) {
+          // Pure blue — Black exclusive
+          ctx.fillStyle = `rgba(91,158,245,${hb * intensity * 0.82})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        } else if (both) {
+          // Contested — base red, tint orange if White wins, purple if Black wins
+          const totalAlpha = Math.min((hw + hb) / 2 * intensity * 0.85, 0.9);
+          const balance = hw / (hw + hb); // 0=all Black, 1=all White
+          // balance > 0.5 → lean orange (mix red+green channel)
+          // balance < 0.5 → lean purple (mix red+blue channel)
+          const r = 232;
+          const g = balance > 0.5 ? Math.round((balance - 0.5) * 2 * 160) : 0;
+          const b = balance < 0.5 ? Math.round((0.5 - balance) * 2 * 180) : 0;
+          ctx.fillStyle = `rgba(${r},${g},${b},${totalAlpha})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        }
+      } else if (heatMode === 'history') {
+        if (wOnly) {
+          ctx.fillStyle = `rgba(78,203,138,${hw * intensity * 0.75})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        } else if (bOnly) {
+          ctx.fillStyle = `rgba(91,158,245,${hb * intensity * 0.75})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        } else if (both) {
+          const balance = hw / (hw + hb);
+          const totalAlpha = Math.min((hw + hb) / 2 * intensity * 0.8, 0.9);
+          const r = 232;
+          const g = balance > 0.5 ? Math.round((balance - 0.5) * 2 * 160) : 0;
+          const b = balance < 0.5 ? Math.round((0.5 - balance) * 2 * 180) : 0;
+          ctx.fillStyle = `rgba(${r},${g},${b},${totalAlpha})`;
+          ctx.fillRect(x, y, SQ, SQ);
+        }
+      }
+
+      // Selected square
+      if (selected) {
+        const sf = selected.charCodeAt(0) - 97;
+        const sr = 8 - parseInt(selected[1]);
+        if (sf === c && sr === r) {
+          ctx.fillStyle = 'rgba(200,169,110,0.5)';
+          ctx.fillRect(x, y, SQ, SQ);
+        }
+      }
+    }
+  }
+
+  // Highlight legal moves
+  if (selected) {
+    const legalMoves = game.moves({ square: selected, verbose: true });
+    legalMoves.forEach(m => {
+      const tf = m.to.charCodeAt(0) - 97;
+      const tr = 8 - parseInt(m.to[1]);
+      const tx = tf * SQ;
+      const ty = tr * SQ;
+      ctx.beginPath();
+      ctx.arc(tx + SQ/2, ty + SQ/2, SQ * 0.15, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(200,169,110,0.6)';
+      ctx.fill();
+    });
+  }
+
+  // Rank & file labels
+  ctx.font = `${SQ * 0.18}px JetBrains Mono, monospace`;
+  ctx.textBaseline = 'top';
+  for (let i = 0; i < 8; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#8b6343' : '#d4c09a';
+    ctx.textAlign = 'left';
+    ctx.fillText(8 - i, 2, i * SQ + 2);
+    ctx.fillStyle = i % 2 === 0 ? '#d4c09a' : '#8b6343';
+    ctx.textAlign = 'right';
+    ctx.fillText(String.fromCharCode(97 + i), (i + 1) * SQ - 2, 7 * SQ + SQ - SQ * 0.22);
+  }
+
+  // Draw pieces
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = board[r][c];
+      if (piece) {
+        drawPiece(piece, c * SQ, r * SQ, SQ);
+      }
+    }
+  }
+
+  updateSidebar(heatW, heatB);
+}
+
+// ── Sidebar stats ──────────────────────────────────────────────────────
+function updateSidebar(heatW, heatB) {
+  // FEN
+  document.getElementById('fen-display').textContent = game.fen();
+
+  // Stats
+  const heat = computeAttackHeat(game);
+  const wTotal = heat.w.reduce((a, b) => a + b, 0);
+  const bTotal = heat.b.reduce((a, b) => a + b, 0);
+  let contested = 0, wDom = 0, bDom = 0;
+
+  for (let i = 0; i < 64; i++) {
+    if (heat.w[i] > 0 && heat.b[i] > 0) contested++;
+    else if (heat.w[i] > heat.b[i]) wDom++;
+    else if (heat.b[i] > heat.w[i]) bDom++;
+  }
+
+  document.getElementById('stat-w').textContent = wTotal;
+  document.getElementById('stat-b').textContent = bTotal;
+  document.getElementById('stat-c').textContent = contested;
+  document.getElementById('stat-d').textContent = wDom > bDom ? `W+${wDom-bDom}` : `B+${bDom-wDom}`;
+
+  // Top squares
+  const combined = heat.w.map((w, i) => ({ i, w, b: heat.b[i], total: w + heat.b[i] }));
+  combined.sort((a, b) => b.total - a.total);
+  const maxTotal = combined[0]?.total || 1;
+
+  const container = document.getElementById('top-squares');
+  container.innerHTML = '';
+  combined.slice(0, 8).forEach(sq => {
+    const file = String.fromCharCode(97 + (sq.i % 8));
+    const rank = 8 - Math.floor(sq.i / 8);
+    const name = file + rank;
+    const pct = (sq.total / maxTotal * 100).toFixed(0);
+    const color = sq.w > sq.b ? '#4ecb8a' : sq.b > sq.w ? '#5b9ef5' : '#e85555';
+    container.innerHTML += `
+      <div class="sq-row">
+        <span class="sq-name">${name}</span>
+        <div class="sq-bar"><div class="sq-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+        <span class="sq-count">${sq.total}</span>
+      </div>`;
+  });
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────
+function buildGameToIndex(idx) {
+  game = new Chess();
+  historyHeat = { w: new Array(64).fill(0), b: new Array(64).fill(0) };
+
+  for (let i = 0; i < idx && i < moves.length; i++) {
+    // Accumulate history heat before each move
+    const heat = computeAttackHeat(game);
+    for (let j = 0; j < 64; j++) {
+      historyHeat.w[j] += heat.w[j];
+      historyHeat.b[j] += heat.b[j];
+    }
+    game.move(moves[i]);
+  }
+  moveIndex = idx;
+}
+
+function goToMove(idx) {
+  idx = Math.max(0, Math.min(idx, moves.length));
+  buildGameToIndex(idx);
+  updateMoveList();
+  updateNavButtons();
+  render();
+}
+
+function nextMove() { if (moveIndex < moves.length) goToMove(moveIndex + 1); }
+function prevMove() { if (moveIndex > 0) goToMove(moveIndex - 1); }
+
+function updateNavButtons() {
+  document.getElementById('btn-prev').disabled = moveIndex === 0;
+  document.getElementById('btn-start').disabled = moveIndex === 0;
+  document.getElementById('btn-next').disabled = moveIndex === moves.length;
+  document.getElementById('btn-end').disabled = moveIndex === moves.length;
+
+  if (moves.length === 0) {
+    document.getElementById('move-counter').textContent = 'Start';
+  } else {
+    const moveNum = Math.ceil(moveIndex / 2);
+    const side = moveIndex % 2 === 0 ? '' : moveIndex % 2 === 1 ? 'W' : 'B';
+    document.getElementById('move-counter').textContent =
+      moveIndex === 0 ? 'Start' : `Move ${moveNum} ${moveIndex % 2 === 1 ? '(W)' : '(B)'}`;
+  }
+}
+
+// ── PGN Loading ────────────────────────────────────────────────────────
+function loadPGN() {
+  const pgn = document.getElementById('pgn-input').value.trim();
+  if (!pgn) return;
+
+  const testGame = new Chess();
+  const ok = testGame.load_pgn(pgn, { sloppy: true });
+  if (!ok) {
+    showToast('Invalid PGN — please check format');
+    return;
+  }
+
+  moves = testGame.history();
+  game = new Chess();
+  moveIndex = 0;
+  historyHeat = { w: new Array(64).fill(0), b: new Array(64).fill(0) };
+
+  updateMoveList();
+  updateNavButtons();
+  render();
+  showToast(`Loaded ${moves.length} moves`);
+}
+
+function updateMoveList() {
+  const container = document.getElementById('move-list');
+  container.innerHTML = '';
+
+  for (let i = 0; i < moves.length; i += 2) {
+    const moveNum = Math.floor(i / 2) + 1;
+    const w = moves[i] || '';
+    const b = moves[i + 1] || '';
+    const wi = i + 1; // 1-indexed move index after white's move
+    const bi = i + 2;
+    container.innerHTML += `
+      <div class="move-pair">
+        <span class="move-num">${moveNum}.</span>
+        <span class="move-san ${moveIndex === wi ? 'current' : ''}" onclick="goToMove(${wi})">${w}</span>
+        <span class="move-san ${b && moveIndex === bi ? 'current' : ''}" onclick="goToMove(${bi})">${b || ''}</span>
+      </div>`;
+  }
+
+  // Scroll current move into view
+  const current = container.querySelector('.current');
+  if (current) current.scrollIntoView({ block: 'nearest' });
+}
+
+// ── Mode toggle ────────────────────────────────────────────────────────
+function setMode(mode) {
+  heatMode = mode;
+  document.querySelectorAll('.toggle-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  render();
+}
+
+// ── Interactive board ──────────────────────────────────────────────────
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = BOARD_SIZE / rect.width;
+  const scaleY = BOARD_SIZE / rect.height;
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top) * scaleY;
+
+  const col = Math.floor(x / SQ);
+  const row = Math.floor(y / SQ);
+  const file = String.fromCharCode(97 + col);
+  const rank = 8 - row;
+  const sq = file + rank;
+
+  const piece = game.get(sq);
+
+  if (selected) {
+    // Try to make move
+    const result = game.move({ from: selected, to: sq, promotion: 'q' });
+    if (result) {
+      // If we're mid-game in loaded PGN, truncate from here
+      if (moveIndex < moves.length) {
+        moves = moves.slice(0, moveIndex);
+      }
+      moves.push(result.san);
+      moveIndex++;
+      selected = null;
+      historyHeat = historyHeat || { w: new Array(64).fill(0), b: new Array(64).fill(0) };
+      updateMoveList();
+      updateNavButtons();
+    } else if (piece && piece.color === game.turn()) {
+      selected = sq;
+    } else {
+      selected = null;
+    }
+  } else {
+    if (piece && piece.color === game.turn()) {
+      selected = sq;
+    }
+  }
+  render();
+});
+
+// ── Keyboard navigation ────────────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') { nextMove(); e.preventDefault(); }
+  if (e.key === 'ArrowLeft') { prevMove(); e.preventDefault(); }
+  if (e.key === 'ArrowUp') { goToMove(moves.length); e.preventDefault(); }
+  if (e.key === 'ArrowDown') { goToMove(0); e.preventDefault(); }
+});
+
+// ── File drop ──────────────────────────────────────────────────────────
+const dropZone = document.getElementById('pgn-drop');
+const fileInput = document.getElementById('pgn-file');
+
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) readPGNFile(file);
+});
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files[0]) readPGNFile(e.target.files[0]);
+});
+
+function readPGNFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('pgn-input').value = e.target.result;
+    loadPGN();
+  };
+  reader.readAsText(file);
+}
+
+// ── Utility ────────────────────────────────────────────────────────────
+function copyFEN() {
+  navigator.clipboard.writeText(game.fen()).then(() => showToast('FEN copied'));
+}
+
+function resetBoard() {
+  game = new Chess();
+  moves = [];
+  moveIndex = 0;
+  selected = null;
+  historyHeat = { w: new Array(64).fill(0), b: new Array(64).fill(0) };
+  document.getElementById('pgn-input').value = '';
+  updateMoveList();
+  updateNavButtons();
+  render();
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+updateNavButtons();
+render();
+</script>
+</body>
+</html>
