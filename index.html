@@ -146,15 +146,12 @@
   .hint { font-size: 0.53rem; color: #3e3c4a; text-align: center; }
 
   /* Right panel */
-  .thermal-bar {
-    height: 10px; border-radius: 3px; margin: 3px 0 2px;
-    background: linear-gradient(to right,
-      #0a0a1e, #15156a, #2244bb, #0088cc,
-      #00bbaa, #44cc44, #aacc00,
-      #ddaa00, #ee5500, #ee1100, #ff4444, #ffee88, #ffffff
-    );
-  }
-  .legend-ends { display: flex; justify-content: space-between; font-size: 0.52rem; color: var(--text-muted); }
+  .color-key { display: flex; flex-direction: column; gap: 8px; }
+  .key-row { display: flex; gap: 9px; align-items: flex-start; }
+  .key-swatch { width: 36px; height: 20px; border-radius: 3px; flex-shrink: 0; margin-top: 1px; }
+  .key-label { display: flex; flex-direction: column; gap: 1px; }
+  .key-title { font-size: 0.62rem; font-weight: 500; }
+  .key-sub { font-size: 0.53rem; color: var(--text-muted); line-height: 1.35; }
 
   .mode-desc {
     font-size: 0.58rem; color: var(--text-muted); line-height: 1.55;
@@ -268,9 +265,25 @@
   <!-- RIGHT -->
   <div class="panel right">
     <div>
-      <div class="sec">Thermal Scale</div>
-      <div class="thermal-bar"></div>
-      <div class="legend-ends"><span>0 pieces</span><span>max coverage</span></div>
+      <div class="sec">Color Key</div>
+      <div class="color-key">
+        <div class="key-row">
+          <div class="key-swatch" style="background:linear-gradient(to right,#3a1800,#ff5500)"></div>
+          <div class="key-label"><span class="key-title" style="color:#ff6622">White dominates</span><span class="key-sub">Brighter = more pieces attacking</span></div>
+        </div>
+        <div class="key-row">
+          <div class="key-swatch" style="background:linear-gradient(to right,#111,#ffe000)"></div>
+          <div class="key-label"><span class="key-title" style="color:#ffe000">Contested</span><span class="key-sub">Both sides attack — yellow = equal, shifts orange/blue with imbalance</span></div>
+        </div>
+        <div class="key-row">
+          <div class="key-swatch" style="background:linear-gradient(to right,#001838,#2255ff)"></div>
+          <div class="key-label"><span class="key-title" style="color:#4477ff">Black dominates</span><span class="key-sub">Brighter = more pieces attacking</span></div>
+        </div>
+        <div class="key-row">
+          <div class="key-swatch" style="background:#0d0d12;border:1px solid #2a2a35"></div>
+          <div class="key-label"><span class="key-title" style="color:#444">No coverage</span><span class="key-sub">No pieces reach this square</span></div>
+        </div>
+      </div>
     </div>
     <div>
       <div class="sec">Mode Guide</div>
@@ -282,7 +295,7 @@
         <div class="stat"><div class="stat-label">White attacks</div><div class="stat-val w" id="stat-w">—</div></div>
         <div class="stat"><div class="stat-label">Black attacks</div><div class="stat-val b" id="stat-b">—</div></div>
         <div class="stat"><div class="stat-label">Contested sq.</div><div class="stat-val" id="stat-c">—</div></div>
-        <div class="stat"><div class="stat-label">Dominant</div><div class="stat-val" id="stat-d">—</div></div>
+        <div class="stat"><div class="stat-label">Territory edge</div><div class="stat-val" id="stat-d">—</div></div>
       </div>
     </div>
     <div>
@@ -570,7 +583,7 @@ function updateStats(rawW, rawB) {
   document.getElementById('stat-c').textContent=contested;
   const diff=wDom-bDom;
   const el=document.getElementById('stat-d');
-  el.textContent=diff===0?'Even':diff>0?`W +${diff}`:`B +${-diff}`;
+  el.textContent=diff===0?'Even':diff>0?`W +${diff} sq`:`B +${-diff} sq`;
   el.className='stat-val'+(diff>0?' w':diff<0?' b':'');
 
   const combined=rawW.map((w,i)=>({i,w,b:rawB[i],total:w+rawB[i]})).sort((a,b)=>b.total-a.total);
